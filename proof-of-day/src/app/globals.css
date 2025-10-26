@@ -1,10 +1,50 @@
+/* Tailwind (v3 or v4) */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Keep it dark; avoid @apply to dodge the build error */
 :root { color-scheme: dark; }
-body { @apply bg-neutral-950 text-neutral-100; }
-.btn { @apply inline-flex items-center justify-center rounded-xl px-4 py-2 font-medium bg-neutral-800 hover:bg-neutral-700 transition; }
-.card { @apply rounded-2xl border border-neutral-800 bg-neutral-900/60 p-4 shadow; }
-.input { @apply w-full rounded-xl bg-neutral-950 border border-neutral-800 px-3 py-2 outline-none focus:border-neutral-600; }
-.label { @apply text-sm text-neutral-400; }
-.gridish { @apply grid gap-4; }
+body {
+  background-color: #0b0b0b; /* ~zinc/neutral 950 */
+  color: #f4f4f5;           /* ~zinc/neutral 100 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Plain CSS helpers to replace the @apply versions */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  border-radius: 0.75rem;
+  font-weight: 500;
+  background: #27272a;    /* zinc-800-ish */
+  color: #e5e7eb;
+  transition: background .15s ease;
+  border: 1px solid #3f3f46;  /* zinc-700-ish */
+}
+.btn:hover { background: #3f3f46; }
+
+.card {
+  border-radius: 1rem;
+  border: 1px solid #27272a;   /* zinc-800-ish */
+  background: rgba(24,24,27,0.6); /* zinc-900/60-ish */
+  padding: 1rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,.2);
+}
+
+.input {
+  width: 100%;
+  border-radius: 0.75rem;
+  background: #000;
+  border: 1px solid #27272a;  /* zinc-800-ish */
+  padding: 0.5rem 0.75rem;
+  outline: none;
+}
+.input:focus { border-color: #52525b; } /* zinc-600-ish */
+
+.label { font-size: 0.875rem; color: #a1a1aa; } /* zinc-400-ish */
+
+.gridish { display: grid; gap: 1rem; }
