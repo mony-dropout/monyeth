@@ -16,7 +16,11 @@ export async function POST(req: NextRequest){
       ref: goal.id,
     });
 
-    updateGoal(goalId, { easUID: res.uid });
+    updateGoal(goalId, {
+      status: pass ? 'PASSED' : 'FAILED',
+      disputed: !!disputed,
+      easUID: res.uid
+    });
 
     return NextResponse.json({ uid: res.uid, txHash: res.txHash, mocked: res.mocked });
   } catch (e: any) {
