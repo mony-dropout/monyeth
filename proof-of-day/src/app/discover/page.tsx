@@ -1,17 +1,38 @@
-async function getAll(){ const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ''}/api/all`, { cache: 'no-store' }); return res.json() }
-export default async function Discover(){
-  const data = await getAll()
+'use client'
+import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
+
+export default function DiscoverPage(){
+  const [users,setUsers] = useState<string[]>([])
+  const [q,setQ] = useState('')
+
+  useEffect(()=>{
+    fetch('/api/users').then(r=>r.json()).then(d=> setUsers(d?.users || []))
+  },[])
+
+  const filtered = useMemo(()=>{
+    const s = q.trim().toLowerCase()
+    if(!s) return users
+    return users.filter(u=> u.toLowerCase().includes(s))
+  },[users,q])
+
   return (
     <main className="gridish">
-      <h2 className="text-xl font-semibold">Recent passes</h2>
-      <div className="grid gap-3">
-        {data.goals.filter((g:any)=>g.status==='PASSED').map((g:any)=>(
-          <div key={g.id} className="card">
-            <div className="font-medium">{g.title}</div>
-            <div className="text-sm text-neutral-400">by {g.user}</div>
-          </div>
-        ))}
+      <div className="card">
+        <h1 className="text-2xl font-semibold">Discover</h1>
+        <div className="text-sm text-neutral-400">Find users and browse their public history</div>
       </div>
+      <div className="card">
+        <input className="input" placeholder="Search username…" value={q} onChange={e=>setQ(e.target.value)} />
+      </div>
+      <section className="grid gap-2">
+        {filtered.length ? filtered.map(u=>(
+          <div key={u} className="card" style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+            <div className="font-medium">@{u}</div>
+            <Link className="btn" href={`/u/${u}`}>View profile</Link>
+          </div>
+        )) : <div className="text-neutral-400">No users found.</div>}
+      </section>
     </main>
   )
 }
