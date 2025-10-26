@@ -1,56 +1,106 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+
 type Status = 'PENDING'|'PASSED'|'FAILED'
-type Goal = { id:string; user:string; title:string; scope?:string; deadlineISO?:string; status:Status; score?:number; rationale?:string; easUID?:string; evidenceURI?:string; createdAt:number }
+interface Goal { id:string; user:string; title:string; scope?:string; deadlineISO?:string; status:Status; score?:number; rationale?:string; easUID?:string; evidenceURI?:string; createdAt:number; questions?:string[] }
+
 export default function ProfilePage(){
   const [user,setUser]=useState(''); const [goals,setGoals]=useState<Goal[]>([])
-  const [title,setTitle]=useState('Read Diestel §2.1–2.3'); const [scope,setScope]=useState('Summarize defs; solve 3 exercises'); const [deadlineISO,setDeadlineISO]=useState('')
+  const [title,setTitle]=useState('Read Diestel §2.1–2.3'); const [scope,setScope]=useState('Summarize key defs; solve 3 exercises'); const [deadlineISO,setDeadlineISO]=useState('')
+
+  // answer modal state
+  const [activeId,setActiveId]=useState<string|null>(null)
+  const [q1,setQ1]=useState(''); const [q2,setQ2]=useState('')
+  const [a1,setA1]=useState(''); const [a2,setA2]=useState('')
+  const [loading,setLoading]=useState(false)
+
   useEffect(()=>{ const u=localStorage.getItem('pod_user'); if(!u) return; setUser(u); refresh(u) },[])
-  const refresh=async(u=user)=>{ if(!u) return; const r=await fetch(`/api/goals?user=${encodeURIComponent(u)}`); const d=await r.json(); setGoals(d.goals) }
-  const createGoal=async()=>{ if(!user) return; await fetch('/api/goals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user,title,scope,deadlineISO})}); refresh() }
-  const complete=async(id:string)=>{ const r=await fetch('/api/goal/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({goalId:id,user})}); const d=await r.json(); if(d.pass){ await fetch('/api/attest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({goalId:id})}) } refresh() }
-  const isMock = (process.env.NEXT_PUBLIC_USE_MOCKS ?? 'true') !== 'false'
+  const refresh = async(u=user)=>{ if(!u) return; const r=await fetch(`/api/goals?user=${encodeURIComponent(u)}`); const d=await r.json(); setGoals(d.goals) }
+
+  const createGoal = async()=>{ if(!user) return; await fetch('/api/goals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user,title,scope,deadlineISO})}); refresh() }
+
+  const startComplete = async(id:string)=>{
+    setLoading(true)
+    const r = await fetch('/api/goal/questions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId:id }) })
+    const d = await r.json(); setLoading(false)
+    if(d.questions && d.questions.length===2){ setQ1(d.questions[0]); setQ2(d.questions[1]); setA1(''); setA2(''); setActiveId(id) }
+  }
+
+  const submitAnswers = async()=>{
+    if(!activeId) return
+    setLoading(true)
+    const r = await fetch('/api/goal/grade', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: activeId, answers: [a1,a2] }) })
+    const d = await r.json(); setLoading(false)
+    setActiveId(null)
+    // If pass, optionally ask chain to attest (still stubbed)
+    if(d.pass){ await fetch('/api/attest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: activeId }) }) }
+    await refresh()
+  }
+
   if(!user) return <main className="card">Please <Link href="/" className="underline">login</Link>.</main>
+
   return (
     <main className="gridish">
       <div className="card gridish">
         <h2 className="text-xl font-semibold">Hello, {user}</h2>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="gridish">
+        <div className="grid" style={{gap: '1rem'}}>
+          <div>
             <label className="label">Goal title</label>
             <input className="input" value={title} onChange={e=>setTitle(e.target.value)} />
+          </div>
+          <div>
             <label className="label">Scope / notes</label>
             <input className="input" value={scope} onChange={e=>setScope(e.target.value)} />
+          </div>
+          <div>
             <label className="label">Deadline (ISO, optional)</label>
             <input className="input" placeholder="2025-10-26T23:00:00+05:30" value={deadlineISO} onChange={e=>setDeadlineISO(e.target.value)} />
-            <button className="btn" onClick={createGoal}>Create goal</button>
           </div>
-          <div className="text-sm text-neutral-400">
-            <p>Demo is running with <b>{isMock ? 'MOCKED' : 'LIVE'}</b> judge & attest.</p>
-            <p>Click <i>Complete (mock)</i> to simulate quiz → PASS → onchain attestation.</p>
-          </div>
+          <button className="btn" onClick={createGoal}>Create goal</button>
         </div>
       </div>
+
+      {/* Answer panel */}
+      {activeId && (
+        <div className="card" style={{position:'sticky', top: 8}}>
+          <div className="text-sm text-neutral-400 mb-2">Answer these two quick questions (then we grade). Be concise.</div>
+          <div className="gridish">
+            <div>
+              <div className="font-medium mb-1">Q1</div>
+              <div className="mb-2 text-neutral-300">{q1}</div>
+              <textarea className="input" style={{height: '120px'}} value={a1} onChange={e=>setA1(e.target.value)} />
+            </div>
+            <div>
+              <div className="font-medium mb-1">Q2</div>
+              <div className="mb-2 text-neutral-300">{q2}</div>
+              <textarea className="input" style={{height: '120px'}} value={a2} onChange={e=>setA2(e.target.value)} />
+            </div>
+            <div className="flex gap-2">
+              <button className="btn" onClick={submitAnswers} disabled={loading || !a1 || !a2}>{loading? 'Scoring…' : 'Submit answers'}</button>
+              <button className="btn" onClick={()=>setActiveId(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <section className="gridish">
         <h3 className="text-lg font-semibold">Your goals</h3>
         <div className="grid gap-3">
-          {goals.map(g=>(
-            <div key={g.id} className="card grid md:grid-cols-4 gap-3 items-center">
-              <div className="md:col-span-2">
+          {goals.map(g=> (
+            <div key={g.id} className="card" style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'0.75rem', alignItems:'center'}}>
+              <div>
                 <div className="font-medium">{g.title}</div>
                 <div className="text-sm text-neutral-400">{g.scope}</div>
               </div>
-              <div className="text-sm">
-                <span className={`px-2 py-1 rounded-lg ${g.status==='PASSED'?'bg-emerald-500/20 text-emerald-300': g.status==='FAILED'?'bg-rose-500/20 text-rose-300':'bg-neutral-800 text-neutral-300'}`}>{g.status}</span>
-              </div>
-              <div className="flex gap-2 justify-end">
-                {g.status==='PENDING' && (<button className="btn" onClick={()=>complete(g.id)}>Complete (mock)</button>)}
+              <div className="flex items-center gap-2">
+                <span className="text-sm" style={{padding:'4px 8px', borderRadius:8, background:g.status==='PASSED'?'#064e3b': g.status==='FAILED'?'#7f1d1d':'#27272a', color:g.status==='PENDING'?'#e5e7eb':'#d1fae5'}}>{g.status}</span>
+                {g.status==='PENDING' && (<button className="btn" onClick={()=>startComplete(g.id)} disabled={!!activeId}>Complete</button>)}
                 <Link className="btn" href={`/notes/${g.id}`}>See notes</Link>
                 {g.easUID ? (
                   <a className="btn" target="_blank" href={`https://base-sepolia.easscan.org/attestation/view/${g.easUID}`}>Blockchain proof</a>
                 ) : (
-                  <button className="btn opacity-50 cursor-not-allowed" title="No attestation yet">Blockchain proof</button>
+                  <button className="btn" title="No attestation yet" disabled>Blockchain proof</button>
                 )}
               </div>
             </div>
