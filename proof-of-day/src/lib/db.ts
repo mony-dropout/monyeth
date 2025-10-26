@@ -16,13 +16,14 @@ export interface Goal {
   questions?: any[]
   answers?: string[]
   disputed?: boolean
+  disputeToken?: string
   createdAt: number
 }
 
 export interface DBShape { goals: Goal[] }
-const g = globalThis as unknown as { __POD_DB?: DBShape }
-if (!g.__POD_DB) g.__POD_DB = { goals: [] }
-export const DB = g.__POD_DB
+const g = (globalThis as any)
+if (!g.__POD_DB) g.__POD_DB = { goals: [] as Goal[] }
+export const DB: DBShape = g.__POD_DB
 
 export function createGoal(data: Pick<Goal, 'user'|'title'|'scope'|'deadlineISO'>) {
   const goal: Goal = {

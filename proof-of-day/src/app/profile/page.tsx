@@ -14,9 +14,10 @@ export default function ProfilePage(){
   const [a1,setA1]=useState(''); const [a2,setA2]=useState('')
   const [loading,setLoading]=useState(false)
 
-  // dispute panel state
+  // dispute state
   const [pendingFailId, setPendingFailId] = useState<string|null>(null)
-  const [showTweetPanel, setShowTweetPanel] = useState(false)
+  const [tweetIntent, setTweetIntent] = useState<string>('')
+  const [tweetUrl, setTweetUrl] = useState<string>('')
 
   useEffect(()=>{ const u=localStorage.getItem('pod_user'); if(!u) return; setUser(u); refresh(u) },[])
   const refresh = async(u=user)=>{ if(!u) return; const r=await fetch(`/api/goals?user=${encodeURIComponent(u)}`); const d=await r.json(); setGoals(d.goals) }
@@ -50,8 +51,10 @@ export default function ProfilePage(){
         await fetch('/api/attest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: activeId, pass: true, disputed: false }) })
         await refresh()
       } else {
-        // ask for dispute
+        // start dispute
         setPendingFailId(activeId)
+        const s = await fetch('/api/dispute/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: activeId }) }).then(r=>r.json())
+        setTweetIntent(s.intentUrl); setTweetUrl('')
       }
     } catch(e:any){
       alert(e?.message || "Network error")
@@ -66,24 +69,25 @@ export default function ProfilePage(){
       await refresh()
     } finally {
       setPendingFailId(null)
-      setShowTweetPanel(false)
       setLoading(false)
     }
   }
 
-  const disputeYes = () => {
-    setShowTweetPanel(true)
-  }
-
-  const disputeTweetConfirmed = async() => {
+  const verifyTweet = async () => {
     if (!pendingFailId) return
+    if (!tweetUrl) { alert('Paste your tweet URL first'); return }
     setLoading(true)
     try {
-      await fetch('/api/attest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: pendingFailId, pass: true, disputed: true }) })
-      await refresh()
+      const r = await fetch('/api/dispute/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: pendingFailId, tweetUrl }) })
+      const d = await r.json()
+      if (d.verified) {
+        alert('Verified! Publishing PASS.')
+        await refresh()
+      } else {
+        alert('Could not verify token/link in tweet. You can publish FAIL instead, or try another tweet.')
+      }
     } finally {
       setPendingFailId(null)
-      setShowTweetPanel(false)
       setLoading(false)
     }
   }
@@ -94,6 +98,10 @@ export default function ProfilePage(){
     <main className="gridish">
       <div className="card gridish">
         <h2 className="text-xl font-semibold">Hello, {user}</h2>
+        <div className="flex gap-3 text-sm text-neutral-400">
+          <Link className="underline" href={`/u/${user}`}>Your public profile</Link>
+          <Link className="underline" href={`/social`}>Social</Link>
+        </div>
         <div className="grid" style={{gap:'1rem'}}>
           <div><label className="label">Goal title</label><input className="input" value={title} onChange={e=>setTitle(e.target.value)} /></div>
           <div><label className="label">Scope / notes</label><input className="input" value={scope} onChange={e=>setScope(e.target.value)} /></div>
@@ -102,7 +110,6 @@ export default function ProfilePage(){
         </div>
       </div>
 
-      {/* Answer panel */}
       {activeId && (
         <div className="card" style={{position:'sticky', top: 8}}>
           <div className="text-sm text-neutral-400 mb-2">Answer these two quick questions, then we grade.</div>
@@ -117,22 +124,18 @@ export default function ProfilePage(){
         </div>
       )}
 
-      {/* Dispute dialog */}
-      {pendingFailId && !showTweetPanel && (
+      {/* Dispute flow */}
+      {pendingFailId && (
         <div className="card">
-          <div className="font-medium mb-2">You FAILED this check. Raise a dispute?</div>
-          <div className="flex gap-2">
-            <button className="btn" onClick={disputeYes}>Yes, dispute (tweet)</button>
+          <div className="font-medium mb-2">You FAILED this check. Raise a dispute via tweet?</div>
+          <div className="flex gap-2 mb-3">
+            <a className="btn" href={tweetIntent || '#'} target="_blank">Open tweet (prefilled)</a>
             <button className="btn" onClick={publishFail}>No, publish FAIL</button>
           </div>
-        </div>
-      )}
-      {pendingFailId && showTweetPanel && (
-        <div className="card">
-          <div className="text-sm text-neutral-300 mb-2">Post a tweet linking your goal page (dummy for now), then click below.</div>
-          <div className="flex gap-2">
-            <button className="btn" onClick={()=>alert('Pretend we opened Twitter with prefilled text…')}>Open Twitter (dummy)</button>
-            <button className="btn" onClick={disputeTweetConfirmed}>I tweeted — publish PASS</button>
+          <div className="text-sm text-neutral-300 mb-1">Paste your tweet URL:</div>
+          <input className="input" placeholder="https://x.com/you/status/123..." value={tweetUrl} onChange={e=>setTweetUrl(e.target.value)} />
+          <div className="flex gap-2 mt-3">
+            <button className="btn" onClick={verifyTweet} disabled={loading || !tweetUrl}>{loading?'Verifying…':'I tweeted — verify & publish PASS'}</button>
           </div>
         </div>
       )}
@@ -147,42 +150,17 @@ export default function ProfilePage(){
                 <div className="text-sm text-neutral-400">{g.scope}</div>
               </div>
               <div className="flex items-center gap-2">
-              <span
-                className="text-sm"
-                style={{
-                  padding: "4px 8px",
-                  borderRadius: 8,
-                  background: g.status === "PASSED" ? "#064e3b" : g.status === "FAILED" ? "#7f1d1d" : "#27272a",
-                  color: g.status === "PENDING" ? "#e5e7eb" : "#d1fae5",
-                }}
-              >
-                {g.status}
-              </span>
-
-              {/* Show Complete unless already PASSED; hide while another goal is active */}
-              {(g.status !== "PASSED") && !activeId && (
-                <button className="btn" onClick={() => startComplete(g.id)}>
-                  Complete
-                </button>
-              )}
-
-              <Link className="btn" href={`/notes/${g.id}`}>See notes</Link>
-
-              {g.easUID ? (
-                <a
-                  className="btn"
-                  target="_blank"
-                  href={`https://base-sepolia.easscan.org/attestation/view/${g.easUID}`}
-                >
-                  Blockchain proof
-                </a>
-              ) : (
-                <button className="btn" title="Publishes automatically after grading" disabled>
-                  Blockchain proof
-                </button>
-              )}
-            </div>
-
+                <span className="text-sm" style={{padding:'4px 8px', borderRadius:8, background:g.status==='PASSED'?'#064e3b': g.status==='FAILED'?'#7f1d1d':'#27272a', color:g.status==='PENDING'?'#e5e7eb':'#d1fae5'}}>{g.status}{g.disputed?'·disputed':''}</span>
+                {(g.status !== "PASSED") && !activeId && !pendingFailId && (
+                  <button className="btn" onClick={()=>startComplete(g.id)}>Complete</button>
+                )}
+                <Link className="btn" href={`/notes/${g.id}`}>See notes</Link>
+                {g.easUID ? (
+                  <a className="btn" target="_blank" href={`https://base-sepolia.easscan.org/attestation/view/${g.easUID}`}>Blockchain proof</a>
+                ) : (
+                  <button className="btn" title="Publishes automatically after grading" disabled>Blockchain proof</button>
+                )}
+              </div>
             </div>
           ))}
         </div>
