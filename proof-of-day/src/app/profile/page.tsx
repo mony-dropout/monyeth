@@ -147,14 +147,42 @@ export default function ProfilePage(){
                 <div className="text-sm text-neutral-400">{g.scope}</div>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm" style={{padding:'4px 8px', borderRadius:8, background:g.status==='PASSED'?'#064e3b': g.status==='FAILED'?'#7f1d1d':'#27272a', color:g.status==='PENDING'?'#e5e7eb':'#d1fae5'}}>{g.status}</span>
-                <Link className="btn" href={`/notes/${g.id}`}>See notes</Link>
-                {g.easUID ? (
-                  <a className="btn" target="_blank" href={`https://base-sepolia.easscan.org/attestation/view/${g.easUID}`}>Blockchain proof</a>
-                ) : (
-                  <button className="btn" title="Will appear after publish" disabled>Blockchain proof</button>
-                )}
-              </div>
+              <span
+                className="text-sm"
+                style={{
+                  padding: "4px 8px",
+                  borderRadius: 8,
+                  background: g.status === "PASSED" ? "#064e3b" : g.status === "FAILED" ? "#7f1d1d" : "#27272a",
+                  color: g.status === "PENDING" ? "#e5e7eb" : "#d1fae5",
+                }}
+              >
+                {g.status}
+              </span>
+
+              {/* Show Complete unless already PASSED; hide while another goal is active */}
+              {(g.status !== "PASSED") && !activeId && (
+                <button className="btn" onClick={() => startComplete(g.id)}>
+                  Complete
+                </button>
+              )}
+
+              <Link className="btn" href={`/notes/${g.id}`}>See notes</Link>
+
+              {g.easUID ? (
+                <a
+                  className="btn"
+                  target="_blank"
+                  href={`https://base-sepolia.easscan.org/attestation/view/${g.easUID}`}
+                >
+                  Blockchain proof
+                </a>
+              ) : (
+                <button className="btn" title="Publishes automatically after grading" disabled>
+                  Blockchain proof
+                </button>
+              )}
+            </div>
+
             </div>
           ))}
         </div>
