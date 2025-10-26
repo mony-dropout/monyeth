@@ -74,23 +74,30 @@ export default function ProfilePage(){
   }
 
   const verifyTweet = async () => {
-    if (!pendingFailId) return
-    if (!tweetUrl) { alert('Paste your tweet URL first'); return }
-    setLoading(true)
+    if (!pendingFailId) return;
+    if (!tweetUrl) { alert("Paste your tweet URL first"); return; }
+    setLoading(true);
     try {
-      const r = await fetch('/api/dispute/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: pendingFailId, tweetUrl }) })
-      const d = await r.json()
-      if (d.verified) {
-        alert('Verified! Publishing PASS.')
-        await refresh()
+      const r = await fetch("/api/dispute/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goalId: pendingFailId, tweetUrl }),
+      });
+      const d = await r.json();
+      if (d?.result === "PASS") {
+        alert("Verified via tweet — PASS published on-chain.");
       } else {
-        alert('Could not verify token/link in tweet. You can publish FAIL instead, or try another tweet.')
+        alert("Tweet could not be verified — FAIL published on-chain.");
       }
+      await refresh();
+    } catch (e:any) {
+      alert("Network error while verifying tweet.");
     } finally {
-      setPendingFailId(null)
-      setLoading(false)
+      setPendingFailId(null);
+      setLoading(false);
     }
-  }
+  };
+  
 
   if(!user) return <main className="card">Please <Link href="/" className="underline">login</Link>.</main>
 

@@ -1,58 +1,87 @@
-import { NextRequest, NextResponse } from "next/server"
-import { getGoal, updateGoal } from "@/lib/db"
-import { attestResult } from "@/lib/eas"
+import { NextRequest, NextResponse } from "next/server";
+import { getGoal, updateGoal } from "@/lib/db";
+import { attestResult } from "@/lib/eas";
 
-// Extract numeric id from twitter/x url
-function parseTweetId(urlStr: string){
+// Accept twitter.com/x.com/mobile URLs
+function parseTweetId(urlStr: string) {
   try {
-    const u = new URL(urlStr)
-    const path = u.pathname
-    const m = path.match(/\/status\/(\d+)/)
-    return m?.[1] || null
-  } catch { return null }
+    const u = new URL(urlStr);
+    const m = u.pathname.match(/\/status\/(\d+)/);
+    return m?.[1] || null;
+  } catch {
+    return null;
+  }
 }
 
-export async function POST(req: NextRequest){
-  const { goalId, tweetUrl } = await req.json()
-  const goal = getGoal(goalId)
-  if (!goal) return NextResponse.json({ error: 'not found' }, { status: 404 })
-  if (!goal.disputeToken) return NextResponse.json({ error: 'no-dispute' }, { status: 400 })
+function includesCI(hay: string, needle: string) {
+  return hay.toLowerCase().includes(needle.toLowerCase());
+}
 
-  const id = parseTweetId(String(tweetUrl||''))
-  if (!id) return NextResponse.json({ error: 'bad-tweet-url' }, { status: 400 })
+// True if any expanded/unwound/url contains /u/<username>
+function urlsContainProfile(urls: any[] | undefined | null, username: string) {
+  if (!Array.isArray(urls)) return false;
+  const target = `/u/${username}`.toLowerCase();
+  for (const u of urls) {
+    const cand = String(u?.expanded_url || u?.unwound_url || u?.url || "").toLowerCase();
+    if (cand.includes(target)) return true;
+  }
+  return false;
+}
 
-  // Use Twitter public syndication JSON (no auth). May occasionally rate-limit.
-  const syndUrl = `https://cdn.syndication.twimg.com/widgets/tweet.json?id=${id}`
-  let ok = false
-  try {
-    const r = await fetch(syndUrl, { cache: 'no-store' })
-    if (r.ok) {
-      const data = await r.json()
-      const text = (data?.text || data?.full_text || '').toString()
-      const hasToken = text.includes(goal.disputeToken)
-      // profile URL we advertised in /start
-      const host = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/,'') || ''
-      const profileLink1 = `${host}/u/${goal.user}`
-      const profileLink2 = `/u/${goal.user}`
-      const hasProfile = text.includes(profileLink1) || text.includes(profileLink2)
-      ok = hasToken && hasProfile
+async function fetchTweetSyndication(id: string) {
+  const url = `https://cdn.syndication.twimg.com/widgets/tweet.json?id=${id}`;
+  const r = await fetch(url, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" } });
+  if (!r.ok) throw new Error(`tweet json ${r.status}`);
+  return r.json();
+}
+
+export async function POST(req: NextRequest) {
+  const { goalId, tweetUrl } = await req.json();
+  const goal = getGoal(goalId);
+  if (!goal) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!goal.disputeToken) return NextResponse.json({ error: "no-dispute" }, { status: 400 });
+
+  const id = parseTweetId(String(tweetUrl || ""));
+  if (!id) return NextResponse.json({ error: "bad-tweet-url" }, { status: 400 });
+
+  // Retry a few times because syndication can lag seconds for fresh tweets
+  let data: any = null,
+    ok = false,
+    lastErr: any = null;
+  for (let i = 0; i < 3 && !ok; i++) {
+    try {
+      data = await fetchTweetSyndication(id);
+      const text = String(data?.text || data?.full_text || "");
+      const tokenOK = includesCI(text, goal.disputeToken || "");
+      const profileOK =
+        includesCI(text, `/u/${goal.user}`) ||
+        urlsContainProfile(data?.entities?.urls, goal.user);
+
+      ok = tokenOK && profileOK;
+      if (!ok && i < 2) await new Promise((r) => setTimeout(r, 1000));
+    } catch (e: any) {
+      lastErr = e;
+      if (i < 2) await new Promise((r) => setTimeout(r, 1000));
     }
-  } catch (e) {
-    // network blocked → remain false (we'll tell client)
   }
 
-  if (!ok) {
-    return NextResponse.json({ verified: false, error: 'token-or-link-missing' }, { status: 200 })
-  }
-
-  // Verified: publish PASS attestation (disputed = true)
+  // Decide + publish on-chain (always)
+  const result = ok ? "PASS" : "FAIL";
   const res = await attestResult({
     username: goal.user,
     goalTitle: goal.title,
-    result: "PASS",
+    result: result as "PASS" | "FAIL",
     disputed: true,
-    ref: goal.id
-  })
-  updateGoal(goalId, { status: 'PASSED', easUID: res.uid, disputed: true })
-  return NextResponse.json({ verified: true, uid: res.uid, txHash: res.txHash, mocked: res.mocked })
+    ref: goal.id,
+  });
+  updateGoal(goalId, { status: ok ? "PASSED" : "FAILED", easUID: res.uid, disputed: true });
+
+  return NextResponse.json({
+    verified: ok,
+    result,
+    uid: res.uid,
+    txHash: res.txHash,
+    mocked: res.mocked,
+    note: ok ? "Verified via tweet" : `Could not verify (published FAIL${lastErr ? ": " + String(lastErr) : ""})`,
+  });
 }
