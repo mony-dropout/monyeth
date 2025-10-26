@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getUserGoals } from '@/lib/db'
+import { getUserGoalsKV } from '@/lib/store'
 
 export async function GET(req: NextRequest, { params }: { params: { username: string } }) {
   const username = params.username
-  const goals = getUserGoals(username)
-  // Public: show all, but only include fields relevant for public view
+  const goals = await getUserGoalsKV(username)
   const pub = goals.map(g => ({
     id: g.id,
     title: g.title,

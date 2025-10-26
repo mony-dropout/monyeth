@@ -1,3 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p src/lib
+
+cat > src/lib/judge.ts <<'TS'
 /**
  * LLM judge helpers (server only).
  * Exports:
@@ -145,3 +150,6 @@ export async function gradeAnswers(input: { goal: string; scope?: string; questi
     return "PASS";
   }
 }
+TS
+
+echo "✅ judge.ts replaced with generateQuestions + gradeAnswers (with safe fallbacks)."
