@@ -1,11 +1,14 @@
 import Link from "next/link"
-import { getUserGoalsKV } from "@/lib/store"
 
-export const dynamic = 'force-dynamic'
+async function fetchUserGoals(username: string){
+  const r = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/api/user/${username}/goals`, { cache:'no-store' }).catch(()=>null)
+  if(!r || !r.ok) return { goals: [] as any[] }
+  return r.json()
+}
 
 export default async function PublicProfile({ params }: { params: { username: string } }){
   const username = params.username
-  const goals = await getUserGoalsKV(username)
+  const { goals } = await fetchUserGoals(username)
 
   return (
     <main className="gridish">
@@ -15,7 +18,7 @@ export default async function PublicProfile({ params }: { params: { username: st
       </div>
 
       <section className="grid gap-3">
-        {goals.length ? goals.map(g=>(
+        {goals.length ? goals.map((g:any)=>(
           <div key={g.id} className="card" style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'0.75rem', alignItems:'center'}}>
             <div>
               <div className="font-medium">{g.title}</div>

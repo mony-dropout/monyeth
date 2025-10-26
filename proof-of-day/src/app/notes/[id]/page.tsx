@@ -1,10 +1,14 @@
 import { notFound } from "next/navigation"
-import { getGoalKV } from "@/lib/store"
 
-export const dynamic = 'force-dynamic'
+async function fetchGoal(id: string){
+  const r = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/api/goal/${id}`, { cache: 'no-store' }).catch(()=>null)
+  if(!r || !r.ok) return null
+  const d = await r.json()
+  return d.goal as any
+}
 
 export default async function NotesPage({ params }: { params: { id: string } }){
-  const g = await getGoalKV(params.id)
+  const g = await fetchGoal(params.id)
   if(!g) notFound()
 
   return (
