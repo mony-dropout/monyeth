@@ -1,14 +1,26 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getGoal, updateGoal } from '@/lib/db'
-const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS !== 'false'
+import { NextRequest, NextResponse } from "next/server";
+import { getGoal, updateGoal } from "@/lib/db";
+import { attestResult } from "@/lib/eas";
+
 export async function POST(req: NextRequest){
-  const { goalId } = await req.json()
-  const goal = getGoal(goalId)
-  if(!goal) return NextResponse.json({ error: 'not found' }, { status: 404 })
-  if (USE_MOCKS) {
-    const uid = `MOCK-${goal.id}`
-    updateGoal(goalId, { easUID: uid })
-    return NextResponse.json({ uid, txHash: '0xMOCK' })
+  try {
+    const { goalId, pass, disputed } = await req.json(); // pass:boolean, disputed:boolean
+    const goal = getGoal(goalId);
+    if (!goal) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+    const res = await attestResult({
+      username: goal.user,
+      goalTitle: goal.title,
+      result: pass ? "PASS" : "FAIL",
+      disputed: !!disputed,
+      ref: goal.id,
+    });
+
+    updateGoal(goalId, { easUID: res.uid });
+
+    return NextResponse.json({ uid: res.uid, txHash: res.txHash, mocked: res.mocked });
+  } catch (e: any) {
+    console.error("attest route error:", e);
+    return NextResponse.json({ error: "attestation failed", details: e?.message ?? String(e) }, { status: 500 });
   }
-  return NextResponse.json({ uid: 'TODO', txHash: '0xTODO' })
 }

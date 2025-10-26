@@ -13,8 +13,9 @@ export interface Goal {
   easUID?: string
   score?: number
   rationale?: string
-  questions?: string[]
+  questions?: any[]
   answers?: string[]
+  disputed?: boolean
   createdAt: number
 }
 
@@ -31,17 +32,13 @@ export function createGoal(data: Pick<Goal, 'user'|'title'|'scope'|'deadlineISO'
     scope: data.scope,
     deadlineISO: data.deadlineISO,
     status: 'PENDING',
+    disputed: false,
     createdAt: Date.now()
   }
   DB.goals.unshift(goal)
   return goal
 }
 
-export function getUserGoals(user: string) { return DB.goals.filter(g => g.user === user) }
-export function getGoal(id: string) { return DB.goals.find(g => g.id === id) }
-export function updateGoal(id: string, patch: Partial<Goal>) {
-  const goal = getGoal(id)
-  if (!goal) return null
-  Object.assign(goal, patch)
-  return goal
-}
+export const getUserGoals = (u:string)=> DB.goals.filter(g=>g.user===u)
+export const getGoal = (id:string)=> DB.goals.find(g=>g.id===id)
+export function updateGoal(id:string, patch: Partial<Goal>){ const goal=getGoal(id); if(!goal) return null; Object.assign(goal, patch); return goal }

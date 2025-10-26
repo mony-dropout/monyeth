@@ -1,3 +1,158 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "▶ Installing deps (@eas-sdk + ethers)…"
+npm i @ethereum-attestation-service/eas-sdk ethers >/dev/null
+
+echo "▶ Adding lib/eas.ts (Base Sepolia attestation helper)…"
+mkdir -p src/lib
+cat > src/lib/eas.ts <<'TS'
+import { EAS, SchemaEncoder } from "@ethereum-attestation-service/eas-sdk";
+import { ethers } from "ethers";
+
+const ZERO_UID = "0x0000000000000000000000000000000000000000000000000000000000000000";
+const DEFAULT_EAS = "0x4200000000000000000000000000000000000021"; // Base Sepolia EAS
+// Schema for this demo:
+//   string app,string username,string goal,string result,bool disputed,string ref
+// You'll register it and paste UID into EAS_SCHEMA_UID.
+const SCHEMA = "string app,string username,string goal,string result,bool disputed,string ref";
+
+type AttestInput = {
+  username: string;
+  goalTitle: string;
+  result: "PASS" | "FAIL";
+  disputed: boolean;
+  ref: string; // goal id
+};
+
+export async function attestResult(input: AttestInput): Promise<{ uid: string; txHash: string; mocked: boolean }> {
+  const RPC = process.env.RPC_URL_BASE_SEPOLIA;
+  const PK  = process.env.PLATFORM_PRIVATE_KEY;
+  const SCHEMA_UID = process.env.EAS_SCHEMA_UID;
+  const EAS_ADDR = process.env.EAS_CONTRACT_ADDRESS ?? DEFAULT_EAS;
+
+  // Mock if envs are missing
+  if (!RPC || !PK || !SCHEMA_UID) {
+    const uid = `MOCK-${input.result}-${input.ref}`;
+    return { uid, txHash: "0xMOCK", mocked: true };
+  }
+
+  const provider = new ethers.JsonRpcProvider(RPC);
+  const wallet = new ethers.Wallet(PK, provider);
+
+  const eas = new EAS(EAS_ADDR);
+  eas.connect(wallet);
+
+  const encoder = new SchemaEncoder(SCHEMA);
+  const data = encoder.encodeData([
+    { name: "app",      type: "string", value: "ProofOfDay" },
+    { name: "username", type: "string", value: input.username },
+    { name: "goal",     type: "string", value: input.goalTitle },
+    { name: "result",   type: "string", value: input.result },
+    { name: "disputed", type: "bool",   value: input.disputed },
+    { name: "ref",      type: "string", value: input.ref },
+  ]);
+
+  const tx = await eas.attest({
+    schema: SCHEMA_UID,
+    data: {
+      recipient: wallet.address,     // platform as recipient for demo
+      expirationTime: 0,             // no expiry
+      revocable: true,
+      refUID: ZERO_UID,
+      data,
+      value: 0,
+    },
+  });
+
+  const uid = await tx.wait();
+  return { uid, txHash: tx.hash, mocked: false };
+}
+
+export const EAS_SCHEMA_STRING = SCHEMA;
+TS
+
+echo "▶ Wiring /api/attest to call EAS…"
+mkdir -p src/app/api/attest
+cat > src/app/api/attest/route.ts <<'TS'
+import { NextRequest, NextResponse } from "next/server";
+import { getGoal, updateGoal } from "@/lib/db";
+import { attestResult } from "@/lib/eas";
+
+export async function POST(req: NextRequest){
+  try {
+    const { goalId, pass, disputed } = await req.json(); // pass:boolean, disputed:boolean
+    const goal = getGoal(goalId);
+    if (!goal) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+    const res = await attestResult({
+      username: goal.user,
+      goalTitle: goal.title,
+      result: pass ? "PASS" : "FAIL",
+      disputed: !!disputed,
+      ref: goal.id,
+    });
+
+    updateGoal(goalId, { easUID: res.uid });
+
+    return NextResponse.json({ uid: res.uid, txHash: res.txHash, mocked: res.mocked });
+  } catch (e: any) {
+    console.error("attest route error:", e);
+    return NextResponse.json({ error: "attestation failed", details: e?.message ?? String(e) }, { status: 500 });
+  }
+}
+TS
+
+echo "▶ Updating DB: add 'disputed' flag (non-breaking)…"
+cat > src/lib/db.ts <<'TS'
+import { v4 as uuid } from 'uuid'
+
+export type GoalStatus = 'PENDING' | 'PASSED' | 'FAILED'
+export interface Goal {
+  id: string
+  user: string
+  title: string
+  scope?: string
+  deadlineISO?: string
+  status: GoalStatus
+  notes?: string
+  evidenceURI?: string
+  easUID?: string
+  score?: number
+  rationale?: string
+  questions?: any[]
+  answers?: string[]
+  disputed?: boolean
+  createdAt: number
+}
+
+export interface DBShape { goals: Goal[] }
+const g = globalThis as unknown as { __POD_DB?: DBShape }
+if (!g.__POD_DB) g.__POD_DB = { goals: [] }
+export const DB = g.__POD_DB
+
+export function createGoal(data: Pick<Goal, 'user'|'title'|'scope'|'deadlineISO'>) {
+  const goal: Goal = {
+    id: uuid(),
+    user: data.user,
+    title: data.title,
+    scope: data.scope,
+    deadlineISO: data.deadlineISO,
+    status: 'PENDING',
+    disputed: false,
+    createdAt: Date.now()
+  }
+  DB.goals.unshift(goal)
+  return goal
+}
+
+export const getUserGoals = (u:string)=> DB.goals.filter(g=>g.user===u)
+export const getGoal = (id:string)=> DB.goals.find(g=>g.id===id)
+export function updateGoal(id:string, patch: Partial<Goal>){ const goal=getGoal(id); if(!goal) return null; Object.assign(goal, patch); return goal }
+TS
+
+echo "▶ Updating Profile UI for dispute flow…"
+cat > src/app/profile/page.tsx <<'TSX'
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -162,3 +317,70 @@ export default function ProfilePage(){
     </main>
   )
 }
+TSX
+
+echo "▶ Adding schema registration script (one-off)…"
+mkdir -p scripts
+cat > scripts/register-eas-schema.mjs <<'MJS'
+import { SchemaRegistry } from "@ethereum-attestation-service/eas-sdk";
+import { ethers } from "ethers";
+
+const RPC = process.env.RPC_URL_BASE_SEPOLIA;
+const PK  = process.env.PLATFORM_PRIVATE_KEY;
+const REG = process.env.SCHEMA_REGISTRY_ADDRESS ?? "0x4200000000000000000000000000000000000020"; // Base Sepolia
+
+const SCHEMA = "string app,string username,string goal,string result,bool disputed,string ref";
+
+if (!RPC || !PK) {
+  console.error("Missing RPC_URL_BASE_SEPOLIA or PLATFORM_PRIVATE_KEY");
+  process.exit(1);
+}
+
+const provider = new ethers.JsonRpcProvider(RPC);
+const wallet = new ethers.Wallet(PK, provider);
+
+const registry = new SchemaRegistry(REG);
+registry.connect(wallet);
+
+console.log("Registering schema on Base Sepolia…");
+const tx = await registry.register({
+  schema: SCHEMA,
+  resolverAddress: "0x0000000000000000000000000000000000000000",
+  revocable: true
+});
+const uid = await tx.wait();
+console.log("Schema UID:", uid);
+console.log("Paste this into .env.local as EAS_SCHEMA_UID");
+MJS
+
+echo "▶ Updating .env.local.example and ensuring keys…"
+if [ ! -f .env.local.example ]; then
+  cat > .env.local.example <<'ENV'
+OPENAI_API_KEY=
+NEXT_PUBLIC_USE_MOCKS=false
+
+# EAS / Base Sepolia
+RPC_URL_BASE_SEPOLIA=
+PLATFORM_PRIVATE_KEY=
+EAS_CONTRACT_ADDRESS=0x4200000000000000000000000000000000000021
+EAS_SCHEMA_UID=
+SCHEMA_REGISTRY_ADDRESS=0x4200000000000000000000000000000000000020
+ENV
+fi
+
+echo "▶ Done.
+
+Next:
+1) Fill .env.local with:
+   OPENAI_API_KEY=sk-...
+   NEXT_PUBLIC_USE_MOCKS=false
+   RPC_URL_BASE_SEPOLIA= (e.g. https://base-sepolia.example-rpc)
+   PLATFORM_PRIVATE_KEY= (your test wallet key with a bit of Base Sepolia ETH)
+   EAS_SCHEMA_UID= (run: node scripts/register-eas-schema.mjs)
+
+2) Restart: npm run dev
+
+3) Flow: Complete → if PASS auto-publishes PASS → if FAIL shows dispute → choose No (publishes FAIL) or Yes+Tweet (publishes PASS).
+
+Explorer link appears on each goal once published (Base Sepolia EAS Scan).
+"
