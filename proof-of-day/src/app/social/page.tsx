@@ -20,12 +20,30 @@ export default async function SocialPage(){
         {items.length ? items.map((it:any)=>(
           <div key={it.id} className="card" style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'0.75rem', alignItems:'center'}}>
             <div>
-              <div className="font-medium"><Link className="underline" href={`/u/${it.username}`}>@{it.username}</Link> — {it.title}</div>
+              <div className="font-medium">
+                <Link className="underline" href={`/u/${it.username}`}>@{it.username}</Link> — {it.title}
+              </div>
               <div className="text-sm text-neutral-400">{new Date(it.createdAt).toLocaleString()}</div>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm" style={{padding:'4px 8px', borderRadius:8, background:it.status==='PASSED'?'#064e3b': it.status==='FAILED'?'#7f1d1d':'#27272a', color:it.status==='PENDING'?'#e5e7eb':'#d1fae5'}}>{it.status}{it.disputed?'·disputed':''}</span>
-              <a className="btn" target="_blank" href={`https://base-sepolia.easscan.org/attestation/view/${it.easUID}`}>Proof</a>
+              <span
+                className="text-sm"
+                style={{
+                  padding:'4px 8px',
+                  borderRadius:8,
+                  background:it.status==='PASSED'?'#064e3b': it.status==='FAILED'?'#7f1d1d':'#27272a',
+                  color:it.status==='PENDING'?'#e5e7eb':'#d1fae5'
+                }}
+              >
+                {it.status}{it.disputed ? '·disputed' : ''}
+              </span>
+
+              {/* NEW: Notes button (opens the same notes page as in your profile) */}
+              <Link className="btn" href={`/notes/${it.id}`}>Notes</Link>
+
+              <a className="btn" target="_blank" href={`https://base-sepolia.easscan.org/attestation/view/${it.easUID}`}>
+                Proof
+              </a>
             </div>
           </div>
         )) : <div className="text-neutral-400">No attestations yet.</div>}
