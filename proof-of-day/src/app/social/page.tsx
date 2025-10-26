@@ -1,4 +1,5 @@
 import Link from "next/link"
+import NotesInline from "@/components/NotesInline"
 
 async function fetchFeed(){
   const r = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/api/feed`, { cache: 'no-store' }).catch(()=>null)
@@ -18,14 +19,15 @@ export default async function SocialPage(){
 
       <section className="grid gap-3">
         {items.length ? items.map((it:any)=>(
-          <div key={it.id} className="card" style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'0.75rem', alignItems:'center'}}>
+          <div key={it.id} className="card" style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'0.75rem', alignItems:'flex-start'}}>
             <div>
               <div className="font-medium">
                 <Link className="underline" href={`/u/${it.username}`}>@{it.username}</Link> — {it.title}
               </div>
-              <div className="text-sm text-neutral-400">{new Date(it.createdAt).toLocaleString()}</div>
+              {it.scope ? <div className="text-sm text-neutral-400">{it.scope}</div> : null}
+              <div className="text-xs text-neutral-500 mt-1">{new Date(it.createdAt).toLocaleString()}</div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-start gap-2">
               <span
                 className="text-sm"
                 style={{
@@ -38,8 +40,7 @@ export default async function SocialPage(){
                 {it.status}{it.disputed ? '·disputed' : ''}
               </span>
 
-              {/* NEW: Notes button (opens the same notes page as in your profile) */}
-              <Link className="btn" href={`/notes/${it.id}`}>Notes</Link>
+              <NotesInline goalId={it.id} initialNotes={it.notes} />
 
               <a className="btn" target="_blank" href={`https://base-sepolia.easscan.org/attestation/view/${it.easUID}`}>
                 Proof

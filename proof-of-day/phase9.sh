@@ -1,3 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mkdir -p src/components
+
+echo "▶ Add a reusable inline notes expander (client)…"
+cat > src/components/NotesInline.tsx <<'TSX'
+'use client'
+import { useState } from 'react'
+
+export default function NotesInline({
+  goalId,
+  initialNotes
+}: {
+  goalId: string
+  initialNotes?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [notes, setNotes] = useState<string | null>(initialNotes ?? null)
+  const [err, setErr] = useState<string | null>(null)
+
+  const toggle = async () => {
+    setOpen(o => !o)
+    if (!open && notes == null) {
+      setLoading(true); setErr(null)
+      try {
+        const r = await fetch(`/api/goal/${goalId}`, { cache: 'no-store' })
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const d = await r.json()
+        setNotes(d?.goal?.notes || '')
+      } catch (e: any) {
+        setErr(e?.message || 'Failed to load notes')
+      } finally {
+        setLoading(false)
+      }
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button className="btn" onClick={toggle}>{open ? 'Hide notes' : 'Notes'}</button>
+      {open && (
+        <div className="mt-1 w-full">
+          {loading ? (
+            <div className="text-sm text-neutral-400">Loading notes…</div>
+          ) : err ? (
+            <div className="text-sm text-red-400">{err}</div>
+          ) : (
+            <pre className="whitespace-pre-wrap text-neutral-200 bg-neutral-900 p-3 rounded-xl border border-neutral-800">
+{(notes ?? 'No notes yet.')}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+TSX
+
+echo "▶ Update /profile to show inline notes (remove link)…"
+cat > src/app/profile/page.tsx <<'TSX'
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -190,3 +252,118 @@ export default function ProfilePage(){
     </main>
   )
 }
+TSX
+
+echo "▶ Update /social to use inline notes (fetch per item)…"
+cat > src/app/social/page.tsx <<'TSX'
+import Link from "next/link"
+import NotesInline from "@/components/NotesInline"
+
+async function fetchFeed(){
+  const r = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/api/feed`, { cache: 'no-store' }).catch(()=>null)
+  if (!r || !r.ok) return { items: [] as any[] }
+  return r.json()
+}
+
+export default async function SocialPage(){
+  const { items } = await fetchFeed()
+
+  return (
+    <main className="gridish">
+      <div className="card">
+        <h1 className="text-2xl font-semibold">Social</h1>
+        <div className="text-sm text-neutral-400">Newest on-chain proofs</div>
+      </div>
+
+      <section className="grid gap-3">
+        {items.length ? items.map((it:any)=>(
+          <div key={it.id} className="card" style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'0.75rem', alignItems:'flex-start'}}>
+            <div>
+              <div className="font-medium">
+                <Link className="underline" href={`/u/${it.username}`}>@{it.username}</Link> — {it.title}
+              </div>
+              {it.scope ? <div className="text-sm text-neutral-400">{it.scope}</div> : null}
+              <div className="text-xs text-neutral-500 mt-1">{new Date(it.createdAt).toLocaleString()}</div>
+            </div>
+            <div className="flex items-start gap-2">
+              <span
+                className="text-sm"
+                style={{
+                  padding:'4px 8px',
+                  borderRadius:8,
+                  background:it.status==='PASSED'?'#064e3b': it.status==='FAILED'?'#7f1d1d':'#27272a',
+                  color:it.status==='PENDING'?'#e5e7eb':'#d1fae5'
+                }}
+              >
+                {it.status}{it.disputed ? '·disputed' : ''}
+              </span>
+
+              {/* Inline notes fetches goal notes by id */}
+              <NotesInline goalId={it.id} />
+
+              <a className="btn" target="_blank" href={`https://base-sepolia.easscan.org/attestation/view/${it.easUID}`}>
+                Proof
+              </a>
+            </div>
+          </div>
+        )) : <div className="text-neutral-400">No attestations yet.</div>}
+      </section>
+
+      <div className="text-sm text-neutral-500">
+        <Link className="underline" href="/">Back to app</Link>
+      </div>
+    </main>
+  )
+}
+TSX
+
+echo "▶ Update public profile /u/[username] to use inline notes too…"
+cat > src/app/u/[username]/page.tsx <<'TSX'
+import Link from "next/link"
+import NotesInline from "@/components/NotesInline"
+
+async function fetchUserGoals(username: string){
+  const r = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/api/user/${username}/goals`, { cache:'no-store' }).catch(()=>null)
+  if(!r || !r.ok) return { goals: [] as any[] }
+  return r.json()
+}
+
+export default async function PublicProfile({ params }: { params: { username: string } }){
+  const username = params.username
+  const { goals } = await fetchUserGoals(username)
+
+  return (
+    <main className="gridish">
+      <div className="card">
+        <h1 className="text-2xl font-semibold">@{username}</h1>
+        <div className="text-sm text-neutral-400">Public history</div>
+      </div>
+
+      <section className="grid gap-3">
+        {goals.length ? goals.map((g:any)=>(
+          <div key={g.id} className="card" style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'0.75rem', alignItems:'flex-start'}}>
+            <div>
+              <div className="font-medium">{g.title}</div>
+              {g.scope ? <div className="text-sm text-neutral-400">{g.scope}</div> : null}
+              <div className="text-xs text-neutral-500 mt-1">{new Date(g.createdAt).toLocaleString()}</div>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-sm" style={{padding:'4px 8px', borderRadius:8, background:g.status==='PASSED'?'#064e3b': g.status==='FAILED'?'#7f1d1d':'#27272a', color:g.status==='PENDING'?'#e5e7eb':'#d1fae5'}}>{g.status}{g.disputed?'·disputed':''}</span>
+              <NotesInline goalId={g.id} />
+              {g.easUID ? (
+                <a className="btn" target="_blank" href={`https://base-sepolia.easscan.org/attestation/view/${g.easUID}`}>Proof</a>
+              ) : (
+                <button className="btn" disabled title="No attestation yet">Proof</button>
+              )}
+            </div>
+          </div>
+        )) : (
+          <div className="text-neutral-400">No entries yet.</div>
+        )}
+      </section>
+    </main>
+  )
+}
+TSX
+
+echo "✅ Inline notes now render directly on profile, social, and public profile."

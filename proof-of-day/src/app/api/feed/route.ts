@@ -11,7 +11,8 @@ export async function GET() {
     status: g.status,
     disputed: g.disputed,
     easUID: g.easUID,
-    createdAt: g.createdAt
+    createdAt: g.createdAt,
+    notes: g.notes ?? null,
   }));
   return NextResponse.json({ items: out })
 }

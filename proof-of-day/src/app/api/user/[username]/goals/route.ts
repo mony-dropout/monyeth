@@ -11,7 +11,8 @@ export async function GET(req: NextRequest, { params }: { params: { username: st
     status: g.status,
     easUID: g.easUID,
     disputed: g.disputed,
-    createdAt: g.createdAt
+    createdAt: g.createdAt,
+    notes: g.notes ?? null,
   }))
   return NextResponse.json({ username, goals: pub })
 }
