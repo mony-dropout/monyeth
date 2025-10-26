@@ -5,6 +5,8 @@ import Link from 'next/link'
 type Status = 'PENDING'|'PASSED'|'FAILED'
 interface Goal { id:string; user:string; title:string; scope?:string; deadlineISO?:string; status:Status; easUID?:string; createdAt:number; disputed?:boolean }
 
+type DisputePhase = 'ask' | 'tweet' | null
+
 export default function ProfilePage(){
   const [user,setUser]=useState(''); const [goals,setGoals]=useState<Goal[]>([])
   const [title,setTitle]=useState('Read Diestel §2.1–2.3'); const [scope,setScope]=useState('Summarize key defs; solve 3 exercises'); const [deadlineISO,setDeadlineISO]=useState('')
@@ -14,8 +16,9 @@ export default function ProfilePage(){
   const [a1,setA1]=useState(''); const [a2,setA2]=useState('')
   const [loading,setLoading]=useState(false)
 
-  // dispute (self-verify)
+  // dispute state (two-step: ask -> tweet panel)
   const [pendingFailId, setPendingFailId] = useState<string|null>(null)
+  const [disputePhase, setDisputePhase] = useState<DisputePhase>(null)
   const [tweetIntent, setTweetIntent] = useState<string>('')
 
   useEffect(()=>{ const u=localStorage.getItem('pod_user'); if(!u) return; setUser(u); refresh(u) },[])
@@ -50,28 +53,43 @@ export default function ProfilePage(){
         await fetch('/api/attest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: activeId, pass: true, disputed: false }) })
         await refresh()
       } else {
-        // start dispute → just open prefilled tweet, then user self-verifies
+        // FAIL → show first step: ask for dispute or no dispute
         setPendingFailId(activeId)
-        const s = await fetch('/api/dispute/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: activeId }) }).then(r=>r.json())
-        setTweetIntent(s.intentUrl || '#')
+        setDisputePhase('ask')
       }
     } catch(e:any){
       alert(e?.message || "Network error")
     } finally { setLoading(false) }
   }
 
-  const publishFail = async() => {
+  // user chose: No dispute → immediate FAIL attestation (disputed=false)
+  const noDisputePublishFail = async () => {
     if (!pendingFailId) return
     setLoading(true)
     try {
-      await fetch('/api/attest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: pendingFailId, pass: false, disputed: true }) })
+      await fetch('/api/attest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: pendingFailId, pass: false, disputed: false }) })
       await refresh()
     } finally {
       setPendingFailId(null)
+      setDisputePhase(null)
       setLoading(false)
     }
   }
 
+  // user chose: Dispute this check → show tweet panel
+  const goToDisputePanel = async () => {
+    if (!pendingFailId) return
+    setLoading(true)
+    try {
+      const s = await fetch('/api/dispute/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: pendingFailId }) }).then(r=>r.json())
+      setTweetIntent(s.intentUrl || '#')
+      setDisputePhase('tweet')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // In dispute panel: they self-verify PASS after tweeting
   const markPassAfterTweet = async () => {
     if (!pendingFailId) return
     setLoading(true)
@@ -80,6 +98,21 @@ export default function ProfilePage(){
       await refresh()
     } finally {
       setPendingFailId(null)
+      setDisputePhase(null)
+      setLoading(false)
+    }
+  }
+
+  // In dispute panel: they admit they didn't tweet → FAIL (disputed=true)
+  const publishFailFromDispute = async() => {
+    if (!pendingFailId) return
+    setLoading(true)
+    try {
+      await fetch('/api/attest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ goalId: pendingFailId, pass: false, disputed: true }) })
+      await refresh()
+    } finally {
+      setPendingFailId(null)
+      setDisputePhase(null)
       setLoading(false)
     }
   }
@@ -116,16 +149,28 @@ export default function ProfilePage(){
         </div>
       )}
 
-      {/* Dispute (self-verify) */}
-      {pendingFailId && (
+      {/* Dispute step 1: ask */}
+      {pendingFailId && disputePhase === 'ask' && (
         <div className="card">
-          <div className="font-medium mb-2">You FAILED this check. Dispute via tweet?</div>
+          <div className="font-medium mb-2">You FAILED this check.</div>
+          <div className="text-sm text-neutral-300 mb-3">Would you like to dispute?</div>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn" onClick={noDisputePublishFail} disabled={loading}>{loading?'Working…':'No dispute — publish FAIL'}</button>
+            <button className="btn" onClick={goToDisputePanel} disabled={loading}>{loading?'Working…':'Dispute this check'}</button>
+          </div>
+        </div>
+      )}
+
+      {/* Dispute step 2: tweet panel */}
+      {pendingFailId && disputePhase === 'tweet' && (
+        <div className="card">
+          <div className="font-medium mb-2">Dispute via tweet</div>
           <div className="flex gap-2 mb-3">
             <a className="btn" href={tweetIntent || '#'} target="_blank" rel="noreferrer">Open tweet (prefilled)</a>
           </div>
           <div className="flex flex-wrap gap-2">
             <button className="btn" onClick={markPassAfterTweet} disabled={loading}>{loading?'Working…':'I posted the tweet — PASS me'}</button>
-            <button className="btn" onClick={publishFail} disabled={loading}>{loading?'Working…':'I didn’t tweet — publish FAIL'}</button>
+            <button className="btn" onClick={publishFailFromDispute} disabled={loading}>{loading?'Working…':'I didn’t tweet — publish FAIL'}</button>
           </div>
         </div>
       )}
@@ -141,7 +186,8 @@ export default function ProfilePage(){
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm" style={{padding:'4px 8px', borderRadius:8, background:g.status==='PASSED'?'#064e3b': g.status==='FAILED'?'#7f1d1d':'#27272a', color:g.status==='PENDING'?'#e5e7eb':'#d1fae5'}}>{g.status}{g.disputed?'·disputed':''}</span>
-                {(g.status !== "PASSED") && !activeId && !pendingFailId && (
+                {/* Show Complete only for PENDING; hide if answering or in dispute */}
+                {g.status === "PENDING" && !activeId && !pendingFailId && (
                   <button className="btn" onClick={()=>startComplete(g.id)}>Complete</button>
                 )}
                 <Link className="btn" href={`/notes/${g.id}`}>See notes</Link>
