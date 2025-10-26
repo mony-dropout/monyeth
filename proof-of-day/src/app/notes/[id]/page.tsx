@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation"
+import NotesEditor from "@/components/NotesEditor"
 
 async function fetchGoal(id: string){
   const r = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/api/goal/${id}`, { cache: 'no-store' }).catch(()=>null)
@@ -43,10 +44,7 @@ export default async function NotesPage({ params }: { params: { id: string } }){
           </div>
         ) : null}
 
-        <div className="mb-1 text-sm text-neutral-400">Transcript</div>
-        <pre className="whitespace-pre-wrap text-neutral-200 bg-neutral-900 p-3 rounded-xl border border-neutral-800">
-{g.notes || 'No notes yet.'}
-        </pre>
+        <NotesEditor goalId={g.id} initialNotes={g.notes} />
       </div>
     </main>
   )

@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getUserGoalsKV } from '@/lib/store'
+import { getUserGoalsKV, getFeedKV } from '@/lib/store'
+import { getUserGoals as getUserGoalsLegacy } from '@/lib/db'
 
 export async function GET(req: NextRequest, { params }: { params: { username: string } }) {
   const username = params.username
-  const goals = await getUserGoalsKV(username)
+  let goals = await getUserGoalsKV(username)
+  if (!goals.length) {
+    try {
+      const feed = await getFeedKV(400)
+      goals = feed.filter(g => g.user === username)
+    } catch {}
+  }
+  if (!goals.length) {
+    const legacy = getUserGoalsLegacy(username)
+    if (legacy?.length) goals = legacy
+  }
   const pub = goals.map(g => ({
     id: g.id,
     title: g.title,
